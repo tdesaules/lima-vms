@@ -1,0 +1,126 @@
+images:
+  - location: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+cpus: 4
+
+memory: 12GiB
+
+disk: 50GiB
+
+networks:
+  - lima: user-v2
+
+containerd:
+  system: false
+  user: false
+  archives: null
+
+mountType: virtiofs
+mounts:
+  - location: "/Users/tdesaules/Repositories"
+    mountPoint: "/Users/tdesaules/Repositories"
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      apt-get update --yes
+      apt-get upgrade --yes
+      apt-get install glances bridge-utils --yes
+      apt-get dist-upgrade --yes
+      apt-get autoremove --yes
+      apt-get clean
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      curl -sL https://containerlab.dev/setup | sudo bash -s "all"
+      containerlab version upgrade
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+
+      export HOME="/root"
+
+      ARCH=$(uname -m)
+      KUBECTL_VERSION="v1.30.3"
+      CLUSTERCTL_VERSION="v1.7.4"
+      K0SCTL_VERSION="v0.18.1"
+      KIND_VERSION="v0.24.0"
+      K9S_VERSION="v0.32.5"
+      CILIUM_CLI_VERSION="v0.16.15"
+
+      download_binary() {
+        local URL=$1
+        local FILE_NAME=$2
+
+        if [ -z "$URL" ] || [ -z "$FILE_NAME" ]; then
+          return 1
+        fi
+
+        curl --silent --location --fail --remote-name-all --output "/tmp/$FILE_NAME" --request GET "$URL"
+
+        if file "/tmp/$FILE_NAME" | grep -q 'gzip compressed data'; then
+          mv /tmp/$FILE_NAME /tmp/${FILE_NAME}.tar.gz
+          mkdir "/tmp/$FILE_NAME"
+          tar --extract --gzip --file /tmp/$FILE_NAME.tar.gz --directory /tmp/$FILE_NAME/
+          find "/tmp/$FILE_NAME" -type f -exec file {} \; | grep "ELF" | cut -d: -f1 | while read BINARY; do
+            mv "$BINARY" /usr/bin/
+            chmod +x /usr/bin/$FILE_NAME
+          done
+        else
+          mv /tmp/$FILE_NAME /usr/bin/$FILE_NAME
+          chmod +x /usr/bin/$FILE_NAME
+        fi
+
+        if [ $? -eq 0 ]; then
+          return 0
+        else
+          return 1
+        fi
+      }
+
+      if [ "$ARCH" == "x86_64" ]; then
+        KUBECTL_URL="https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+        CLUSTERCTL_URL="https://github.com/kubernetes-sigs/cluster-api/releases/download/$CLUSTERCTL_VERSION/clusterctl-linux-amd64"
+        K0SCTL_URL="https://github.com/k0sproject/k0sctl/releases/download/$K0SCTL_VERSION/k0sctl-linux-x64"
+        KIND_URL="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+        K9S_URL="https://github.com/derailed/k9s/releases/download/$K9S_VERSION/k9s_Linux_amd64.tar.gz"
+        CILIUM_CLI_URL="https://github.com/cilium/cilium-cli/releases/download/$CILIUM_CLI_VERSION/cilium-linux-amd64.tar.gz"
+      elif [ "$ARCH" == "aarch64" ]; then
+        KUBECTL_URL="https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/arm64/kubectl"
+        CLUSTERCTL_URL="https://github.com/kubernetes-sigs/cluster-api/releases/download/$CLUSTERCTL_VERSION/clusterctl-linux-arm64"
+        K0SCTL_URL="https://github.com/k0sproject/k0sctl/releases/download/$K0SCTL_VERSION/k0sctl-linux-arm64"
+        KIND_URL="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-arm64"
+        K9S_URL="https://github.com/derailed/k9s/releases/download/$K9S_VERSION/k9s_Linux_arm64.tar.gz"
+        CILIUM_CLI_URL="https://github.com/cilium/cilium-cli/releases/download/$CILIUM_CLI_VERSION/cilium-linux-arm64.tar.gz"
+      else
+        exit 1
+      fi
+
+      URLS=("KUBECTL_URL" "CLUSTERCTL_URL" "K0SCTL_URL" "KIND_URL" "K9S_URL" "CILIUM_CLI_URL")
+
+      for URL_VAR in "${URLS[@]}"; do
+        URL=${!URL_VAR}
+        FILE_NAME=$(echo "$URL_VAR" | awk -F'_' '{print tolower($1)}')
+        download_binary "$URL" "$FILE_NAME"
+      done
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      curl -sL https://containerlab.dev/setup | sudo bash -s "all"
+      containerlab version upgrade
+      ip link add br0 type bridge
+      ip link set dev br0 up
+      ip link add br1 type bridge
+      ip link set dev br1 up
+      ip link add br2 type bridge
+      ip link set dev br2 up
+      ip link add br3 type bridge
+      ip link set dev br3 up

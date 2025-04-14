@@ -1,0 +1,72 @@
+images:
+  - location: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+cpus: 4
+
+memory: 8GiB
+
+disk: 100GiB
+
+networks:
+  - lima: user-v2
+
+mountType: virtiofs
+mounts:
+  - location: "~"
+  - location: "/tmp/lima"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      apt-get update --yes
+      apt-get upgrade --yes
+      apt-get install glances bridge-utils --yes
+      apt-get dist-upgrade --yes
+      apt-get autoremove --yes
+      apt-get clean
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      sed -i 's/host.lima.internal.*/host.lima.internal host.docker.internal/' /etc/hosts
+      mkdir -p /etc/systemd/system/docker.socket.d
+      tee /etc/systemd/system/docker.socket.d/override.conf > /dev/null <<EOL
+      [Socket]
+      SocketUser={{.User}}
+      EOL
+      apt-get update
+      apt-get install ca-certificates curl
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      apt-get update
+      apt-get install --yes docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+hostResolver:
+  hosts:
+    host.docker.internal: host.lima.internal
+
+portForwards:
+  - guestSocket: "/var/run/docker.sock"
+    hostSocket: "{{.Dir}}/sock/docker.sock"
+
+message: |
+  To run `docker` on the host (assumes docker-cli is installed), run the following commands:
+  ------
+  docker context create lima-docker --docker "host=unix:///Users/tdesaules/.lima/docker/sock/docker.sock"
+  docker context use lima-docker
+  docker run hello-world
+  ------

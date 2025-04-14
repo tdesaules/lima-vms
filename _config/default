@@ -1,0 +1,18 @@
+# VM type: "qemu" or "vz" (on macOS 13 and later).
+# The vmType can be specified only on creating the instance.
+# The vmType of existing instances cannot be changed.
+# Builtin default: "qemu"
+vmType: vz
+
+# Arch: "default", "x86_64", "aarch64".
+# Builtin default: "default" (corresponds to the host architecture)
+arch: aarch64
+
+rosetta: null
+  # Enable Rosetta for Linux (EXPERIMENTAL).
+  # Hint: try `softwareupdate --install-rosetta` if Lima gets stuck at `Installing rosetta...`
+  # Builtin default: false
+  enabled: true
+  # Register rosetta to /proc/sys/fs/binfmt_misc
+  # Builtin default: false
+  binfmt: true

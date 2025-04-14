@@ -1,0 +1,16 @@
+# bootptab
+
+%%
+
+# hostname       hwtype hwaddr            ipaddr          bootfile
+k0s-test-1       1      12:1a:2b:3c:4d:ff 192.168.105.200
+k0s-client-1     1      12:1a:2b:3c:4d:00 192.168.105.100
+k0s-mothership-1 1      16:1a:2b:3c:4d:01 192.168.105.101
+k0s-mothership-2 1      16:1a:2b:3c:4d:02 192.168.105.102
+k0s-mothership-3 1      16:1a:2b:3c:4d:03 192.168.105.103
+k0s-ship-1-1     1      1a:1a:2b:3c:4d:11 192.168.105.111
+k0s-ship-1-2     1      1a:1a:2b:3c:4d:12 192.168.105.112
+k0s-ship-1-3     1      1a:1a:2b:3c:4d:13 192.168.105.113
+k0s-ship-2-1     1      1e:1a:2b:3c:4d:21 192.168.105.121
+k0s-ship-2-2     1      1e:1a:2b:3c:4d:23 192.168.105.122
+k0s-ship-2-3     1      1e:1a:2b:3c:4d:23 192.168.105.123
