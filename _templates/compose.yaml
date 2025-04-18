@@ -1,0 +1,184 @@
+name: k0s-cluster
+
+networks:
+  k0s-net:
+    driver: bridge
+
+services:
+
+  k0s-traefik-1:
+    image: docker.io/traefik:v3.3.5
+    container_name: k0s-traefik-1
+    hostname: k0s-traefik-1
+    networks: ["k0s-net"]
+    privileged: true
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --ping
+      - --entryPoints.kube-api.address=:6443
+      - --entryPoints.k0s-api.address=:9443
+      - --entryPoints.konnectivity.address=:8132
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            traefik healthcheck --ping | grep -q 'OK: http://:8080/ping'
+            return $?
+          }
+          healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+      start_interval: 5s
+    ports:
+      - 6443:6443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  k0s-controller-1:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-controller-1
+    hostname: k0s-controller-1
+    networks: ["k0s-net"]
+    depends_on: 
+      k0s-traefik-1:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - controller
+    post_start:
+      - command:
+          - /bin/sh
+          - -euc
+          - |
+            bootstrap() {
+              find /run/secrets/k0s/controller ! -path /run/secrets/k0s/controller -prune -exec rm -rf {} +
+              k0s token create --role=controller | tee /run/secrets/k0s/controller/token
+              find /run/secrets/k0s/worker ! -path /run/secrets/k0s/worker -prune -exec rm -rf {} +
+              k0s token create --role=worker | tee /run/secrets/k0s/worker/token
+              find /run/secrets/k0s/kubectl ! -path /run/secrets/k0s/kubectl -prune -exec rm -rf {} +
+              k0s kubeconfig admin | tee /run/secrets/k0s/kubectl/config
+            }
+            while [ ! -f /var/lib/k0s/pki/ca.crt ] || ! bootstrap; do
+              sleep 1
+            done
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            k0s kubectl get --raw='/livez' | grep -q 'ok'
+            return $?
+          }
+          healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+      start_interval: 5s
+    volumes:
+      - /var/lib/k0s
+      - secrets-k0s-controller:/run/secrets/k0s/controller
+      - secrets-k0s-worker:/run/secrets/k0s/worker
+      - secrets-k0s-kubectl:/run/secrets/k0s/kubectl
+    tmpfs:
+      - /run
+      - /tmp
+    configs:
+      - source: k0s.yaml
+        target: /etc/k0s/k0s.yaml
+    labels:
+      - traefik.enable=true
+      - traefik.tcp.routers.kube-api.service=kube-api
+      - traefik.tcp.routers.kube-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.kube-api.entrypoints=kube-api
+      - traefik.tcp.services.kube-api.loadbalancer.server.port=6443
+      - traefik.tcp.routers.k0s-api.service=k0s-api
+      - traefik.tcp.routers.k0s-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.k0s-api.entrypoints=k0s-api
+      - traefik.tcp.services.k0s-api.loadbalancer.server.port=9443
+      - traefik.tcp.routers.konnectivity.service=konnectivity
+      - traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)
+      - traefik.tcp.routers.konnectivity.entrypoints=konnectivity
+      - traefik.tcp.services.konnectivity.loadbalancer.server.port=8132
+    restart: on-failure
+
+  k0s-worker-1:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-worker-1
+    hostname: k0s-worker-1
+    networks: ["k0s-net"]
+    depends_on: 
+      k0s-controller-1:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - worker
+      - --token-file
+      - /run/secrets/k0s/worker/token
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            k0s kubectl --kubeconfig /run/secrets/k0s/kubectl/config get node $(hostname) | grep -q "Ready"
+            return $?
+          }
+          healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
+    volumes:
+      - /var/lib/k0s
+      - /var/log/pods
+      - /dev/kmsg:/dev/kmsg:ro
+      - secrets-k0s-worker:/run/secrets/k0s/worker:ro
+      - secrets-k0s-kubectl:/run/secrets/k0s/kubectl:ro
+    tmpfs:
+      - /run
+      - /tmp
+    devices:
+      - /dev/kmsg
+    restart: on-failure
+
+configs:
+  k0s.yaml:
+    content: |
+      apiVersion: k0s.k0s/v1beta1
+      kind: ClusterConfig
+      metadata:
+        name: k0s-cluster
+      spec:
+        api:
+          externalAddress: k0s-traefik-1
+
+volumes:
+  secrets-k0s-controller:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  secrets-k0s-worker:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+  secrets-k0s-kubectl:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
