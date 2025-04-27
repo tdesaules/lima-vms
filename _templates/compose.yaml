@@ -1,8 +1,67 @@
-name: k0s-cluster
+name: k0s-cluster-1
 
 networks:
+
   k0s-net:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.1.0/24
+
+configs:
+
+  k0s.yaml:
+    content: |
+      apiVersion: k0s.k0s/v1beta1
+      kind: ClusterConfig
+      metadata:
+        name: k0s-cluster-1
+      spec:
+        api:
+          externalAddress: 172.18.1.254
+        network:
+          provider: custom
+          kubeProxy:
+            disabled: true
+        extensions:
+          helm:
+            concurrencyLevel: 5
+            repositories:
+              - name: cilium
+                url: https://helm.cilium.io/
+            charts:
+              - name: cilium
+                chartname: cilium/cilium
+                version: 1.17.3
+                order: 1
+                namespace: kube-system
+                values: |
+                  cluster:
+                    name: k0s-cluster-1
+                  k8sServiceHost: 172.18.1.254
+                  k8sServicePort: 6443
+                  kubeProxyReplacement: true
+
+volumes:
+
+  secrets-k0s-controller:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+
+  secrets-k0s-worker:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+
+  secrets-k0s-kubectl:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
 
 services:
 
@@ -10,7 +69,9 @@ services:
     image: docker.io/traefik:v3.3.5
     container_name: k0s-traefik-1
     hostname: k0s-traefik-1
-    networks: ["k0s-net"]
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.254
     privileged: true
     command:
       - --api.insecure=true
@@ -38,6 +99,7 @@ services:
       start_interval: 5s
     ports:
       - 6443:6443
+      - 9443:9443
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -45,7 +107,9 @@ services:
     image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
     container_name: k0s-controller-1
     hostname: k0s-controller-1
-    networks: ["k0s-net"]
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.11
     depends_on: 
       k0s-traefik-1:
         condition: service_healthy
@@ -112,20 +176,24 @@ services:
       - traefik.tcp.services.konnectivity.loadbalancer.server.port=8132
     restart: on-failure
 
-  k0s-worker-1:
+  k0s-controller-2:
     image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-    container_name: k0s-worker-1
-    hostname: k0s-worker-1
-    networks: ["k0s-net"]
+    container_name: k0s-controller-2
+    hostname: k0s-controller-2
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.22
     depends_on: 
+      k0s-traefik-1:
+        condition: service_healthy
       k0s-controller-1:
         condition: service_healthy
     privileged: true
     command:
       - k0s
-      - worker
+      - controller
       - --token-file
-      - /run/secrets/k0s/worker/token
+      - /run/secrets/k0s/controller/token
     healthcheck:
       test: 
         - CMD
@@ -133,8 +201,142 @@ services:
         - -euc
         - |
           healthcheck() {
-            k0s kubectl --kubeconfig /run/secrets/k0s/kubectl/config get node $(hostname) | grep -q "Ready"
+            k0s kubectl get --raw='/livez' | grep -q 'ok'
             return $?
+          }
+          healthcheck
+    volumes:
+      - /var/lib/k0s
+      - secrets-k0s-controller:/run/secrets/k0s/controller:ro
+    tmpfs:
+      - /run
+      - /tmp
+    configs:
+      - source: k0s.yaml
+        target: /etc/k0s/k0s.yaml
+    labels:
+      - traefik.enable=true
+      - traefik.tcp.routers.kube-api.service=kube-api
+      - traefik.tcp.routers.kube-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.kube-api.entrypoints=kube-api
+      - traefik.tcp.services.kube-api.loadbalancer.server.port=6443
+      - traefik.tcp.routers.k0s-api.service=k0s-api
+      - traefik.tcp.routers.k0s-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.k0s-api.entrypoints=k0s-api
+      - traefik.tcp.services.k0s-api.loadbalancer.server.port=9443
+      - traefik.tcp.routers.konnectivity.service=konnectivity
+      - traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)
+      - traefik.tcp.routers.konnectivity.entrypoints=konnectivity
+      - traefik.tcp.services.konnectivity.loadbalancer.server.port=8132
+    restart: on-failure
+
+  k0s-controller-3:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-controller-3
+    hostname: k0s-controller-3
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.33
+    depends_on: 
+      k0s-traefik-1:
+        condition: service_healthy
+      k0s-controller-1:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - controller
+      - --token-file
+      - /run/secrets/k0s/controller/token
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            k0s kubectl get --raw='/livez' | grep -q 'ok'
+            return $?
+          }
+          healthcheck
+    volumes:
+      - /var/lib/k0s
+      - secrets-k0s-controller:/run/secrets/k0s/controller:ro
+    tmpfs:
+      - /run
+      - /tmp
+    configs:
+      - source: k0s.yaml
+        target: /etc/k0s/k0s.yaml
+    labels:
+      - traefik.enable=true
+      - traefik.tcp.routers.kube-api.service=kube-api
+      - traefik.tcp.routers.kube-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.kube-api.entrypoints=kube-api
+      - traefik.tcp.services.kube-api.loadbalancer.server.port=6443
+      - traefik.tcp.routers.k0s-api.service=k0s-api
+      - traefik.tcp.routers.k0s-api.rule=HostSNI(`*`)
+      - traefik.tcp.routers.k0s-api.entrypoints=k0s-api
+      - traefik.tcp.services.k0s-api.loadbalancer.server.port=9443
+      - traefik.tcp.routers.konnectivity.service=konnectivity
+      - traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)
+      - traefik.tcp.routers.konnectivity.entrypoints=konnectivity
+      - traefik.tcp.services.konnectivity.loadbalancer.server.port=8132
+    restart: on-failure
+
+  k0s-worker-1:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-worker-1
+    hostname: k0s-worker-1
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.111
+    depends_on: 
+      k0s-controller-1:
+        condition: service_healthy
+      k0s-controller-2:
+        condition: service_healthy
+      k0s-controller-3:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - worker
+      - --token-file
+      - /run/secrets/k0s/worker/token
+    post_start:
+      - command:
+          - /bin/sh
+          - -euc
+          - |
+            bootstrap() {
+              mount bpffs -t bpf /sys/fs/bpf
+              mount --make-shared /sys/fs/bpf
+              mkdir -p /run/cilium/cgroupv2
+              mount -t cgroup2 none /run/cilium/cgroupv2
+              mount --make-shared /run/cilium/cgroupv2
+              mount --make-shared /
+            }
+            bootstrap
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            if ! command -v jq &> /dev/null; then
+              apk add jq
+            fi
+            k0s kubectl --kubeconfig /run/secrets/k0s/kubectl/config get node $(hostname) -o json |
+            jq -e '
+              .status.conditions
+              | map(select(.type == "MemoryPressure" and .status == "False"
+                        or .type == "DiskPressure" and .status == "False"
+                        or .type == "PIDPressure" and .status == "False"
+                        or .type == "Ready" and .status == "True"))
+              | length == 4
+            ' && return 0 || return 1
           }
           healthcheck
       interval: 30s
@@ -145,40 +347,152 @@ services:
     volumes:
       - /var/lib/k0s
       - /var/log/pods
-      - /dev/kmsg:/dev/kmsg:ro
+      - secrets-k0s-controller:/run/secrets/k0s/controller:ro
       - secrets-k0s-worker:/run/secrets/k0s/worker:ro
       - secrets-k0s-kubectl:/run/secrets/k0s/kubectl:ro
     tmpfs:
       - /run
       - /tmp
-    devices:
-      - /dev/kmsg
     restart: on-failure
 
-configs:
-  k0s.yaml:
-    content: |
-      apiVersion: k0s.k0s/v1beta1
-      kind: ClusterConfig
-      metadata:
-        name: k0s-cluster
-      spec:
-        api:
-          externalAddress: k0s-traefik-1
+  k0s-worker-2:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-worker-2
+    hostname: k0s-worker-2
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.122
+    depends_on: 
+      k0s-controller-1:
+        condition: service_healthy
+      k0s-controller-2:
+        condition: service_healthy
+      k0s-controller-3:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - worker
+      - --token-file
+      - /run/secrets/k0s/worker/token
+    post_start:
+      - command:
+          - /bin/sh
+          - -euc
+          - |
+            bootstrap() {
+              mount bpffs -t bpf /sys/fs/bpf
+              mount --make-shared /sys/fs/bpf
+              mkdir -p /run/cilium/cgroupv2
+              mount -t cgroup2 none /run/cilium/cgroupv2
+              mount --make-shared /run/cilium/cgroupv2
+              mount --make-shared /
+            }
+            bootstrap
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            if ! command -v jq &> /dev/null; then
+              apk add jq
+            fi
+            k0s kubectl --kubeconfig /run/secrets/k0s/kubectl/config get node $(hostname) -o json |
+            jq -e '
+              .status.conditions
+              | map(select(.type == "MemoryPressure" and .status == "False"
+                        or .type == "DiskPressure" and .status == "False"
+                        or .type == "PIDPressure" and .status == "False"
+                        or .type == "Ready" and .status == "True"))
+              | length == 4
+            ' && return 0 || return 1
+          }
+          healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
+    volumes:
+      - /var/lib/k0s
+      - /var/log/pods
+      - secrets-k0s-controller:/run/secrets/k0s/controller:ro
+      - secrets-k0s-worker:/run/secrets/k0s/worker:ro
+      - secrets-k0s-kubectl:/run/secrets/k0s/kubectl:ro
+    tmpfs:
+      - /run
+      - /tmp
+    restart: on-failure
 
-volumes:
-  secrets-k0s-controller:
-    driver: local
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-  secrets-k0s-worker:
-    driver: local
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-  secrets-k0s-kubectl:
-    driver: local
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
+  k0s-worker-3:
+    image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
+    container_name: k0s-worker-3
+    hostname: k0s-worker-3
+    networks: 
+      k0s-net:
+        ipv4_address: 172.18.1.133
+    depends_on: 
+      k0s-controller-1:
+        condition: service_healthy
+      k0s-controller-2:
+        condition: service_healthy
+      k0s-controller-3:
+        condition: service_healthy
+    privileged: true
+    command:
+      - k0s
+      - worker
+      - --token-file
+      - /run/secrets/k0s/worker/token
+    post_start:
+      - command:
+          - /bin/sh
+          - -euc
+          - |
+            bootstrap() {
+              mount bpffs -t bpf /sys/fs/bpf
+              mount --make-shared /sys/fs/bpf
+              mkdir -p /run/cilium/cgroupv2
+              mount -t cgroup2 none /run/cilium/cgroupv2
+              mount --make-shared /run/cilium/cgroupv2
+              mount --make-shared /
+            }
+            bootstrap
+    healthcheck:
+      test: 
+        - CMD
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            if ! command -v jq &> /dev/null; then
+              apk add jq
+            fi
+            k0s kubectl --kubeconfig /run/secrets/k0s/kubectl/config get node $(hostname) -o json |
+            jq -e '
+              .status.conditions
+              | map(select(.type == "MemoryPressure" and .status == "False"
+                        or .type == "DiskPressure" and .status == "False"
+                        or .type == "PIDPressure" and .status == "False"
+                        or .type == "Ready" and .status == "True"))
+              | length == 4
+            ' && return 0 || return 1
+          }
+          healthcheck
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
+    volumes:
+      - /var/lib/k0s
+      - /var/log/pods
+      - secrets-k0s-controller:/run/secrets/k0s/controller:ro
+      - secrets-k0s-worker:/run/secrets/k0s/worker:ro
+      - secrets-k0s-kubectl:/run/secrets/k0s/kubectl:ro
+    tmpfs:
+      - /run
+      - /tmp
+    restart: on-failure

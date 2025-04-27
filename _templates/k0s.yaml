@@ -13,15 +13,17 @@ disk: 100GiB
 networks:
   - lima: user-v2
 
-mountType: virtiofs
-mounts:
-  - location: "~"
-  - location: "/tmp/lima"
-    writable: true
-
 containerd:
   system: false
   user: false
+  archives: null
+
+mountType: virtiofs
+mounts:
+  - location: "~/Repositories"
+    writable: true
+  - location: "/tmp/lima"
+    writable: true
 
 provision:
   - mode: system
@@ -53,23 +55,23 @@ provision:
       #!/bin/bash
       set -eux -o pipefail
       ARCH=$(uname -m)
-      KIND_VERSION=0.27.0
+      CLUSTERCTL_VERSION="1.10.0"
       if [ "$ARCH" == "x86_64" ]; then
-        KIND_URL="https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64"
+        CLUSTERCTL_URL="ttps://github.com/kubernetes-sigs/cluster-api/releases/download/v${K0S_VERSION}/clusterctl-linux-amd64"
       elif [ "$ARCH" == "aarch64" ]; then
-        KIND_URL="https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-arm64"
+        CLUSTERCTL_URL="ttps://github.com/kubernetes-sigs/cluster-api/releases/download/v${K0S_VERSION}/clusterctl-linux-arm64"
       else
         exit 1
       fi
-      curl --silent --location --fail --remote-name-all --request GET "$KIND_URL" --output /tmp/kind
-      install -m 755 /tmp/kind /usr/local/bin/kind
+      curl --silent --location --fail --remote-name-all --request GET "$CLUSTERCTL_URL" --output /tmp/clusterctl
+      install -m 755 /tmp/clusterctl /usr/local/bin/clusterctl
       rm -rf /tmp/*
   - mode: system
     script: |
       #!/bin/bash
       set -eux -o pipefail
       ARCH=$(uname -m)
-      KUBECTL_VERSION=1.32.3
+      KUBECTL_VERSION="1.32.3"
       if [ "$ARCH" == "x86_64" ]; then
         KUBECTL_URL="https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
       elif [ "$ARCH" == "aarch64" ]; then
@@ -77,310 +79,46 @@ provision:
       else
         exit 1
       fi
-      curl --silent --location --remote-name --request GET "$KUBECTL_URL" --output /tmp/kubectl
+      curl --silent --location --fail --remote-name-all --request GET "$KUBECTL_URL" --output /tmp/kubectl
       install -m 755 /tmp/kubectl /usr/local/bin/kubectl
       rm -rf /tmp/*
   - mode: system
     script: |
       #!/bin/bash
       set -eux -o pipefail
-      mkdir /etc/kind
-      tee /etc/kind/config.yml > /dev/null <<EOL
-      kind: Cluster
-      apiVersion: kind.x-k8s.io/v1alpha4
-      networking:
-        apiServerAddress: "127.0.0.1"
-        apiServerPort: 6443
-      nodes:
-        - role: control-plane
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-        - role: control-plane
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-        - role: control-plane
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-        - role: worker
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-        - role: worker
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-        - role: worker
-          image: kindest/node:v1.32.2@sha256:f226345927d7e348497136874b6d207e0b32cc52154ad8323129352923a3142f
-      EOL
-      # kind create cluster --config=/etc/kind/config.yml
+      ARCH=$(uname -m)
+      K9S_VERSION="0.50.4"
+      if [ "$ARCH" == "x86_64" ]; then
+        K9S_URL="https://github.com/derailed/k9s/releases/download/v$K9S_VERSION/k9s_Linux_amd64.tar.gz"
+      elif [ "$ARCH" == "aarch64" ]; then
+        K9S_URL="https://github.com/derailed/k9s/releases/download/v$K9S_VERSION/k9s_Linux_arm64.tar.gz"
+      else
+        exit 1
+      fi
+      curl --silent --location --fail --remote-name-all --request GET "$K9S_URL" --output /tmp/k9s.tar.gz
+      tar --extract --gzip --file /tmp/k9s.tar.gz --directory /usr/local/bin
+      rm -rf /tmp/*
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      ARCH=$(uname -m)
+      CILIUM_VERSION="0.18.3"
+      if [ "$ARCH" == "x86_64" ]; then
+        CILIUM_URL="https://github.com/cilium/cilium-cli/releases/download/v$CILIUM_VERSION/cilium-linux-amd64.tar.gz"
+      elif [ "$ARCH" == "aarch64" ]; then
+        CILIUM_URL="https://github.com/cilium/cilium-cli/releases/download/v$CILIUM_VERSION/cilium-linux-arm64.tar.gz"
+      else
+        exit 1
+      fi
+      curl --silent --location --fail --remote-name-all --request GET "$CILIUM_URL" --output /tmp/cilium.tar.gz
+      tar --extract --gzip --file /tmp/cilium.tar.gz --directory /usr/local/bin
+      rm -rf /tmp/*
   - mode: system
     script: |
       #!/bin/bash
       set -eux -o pipefail
       mkdir /etc/k0s
       tee /etc/k0s/compose.yaml > /dev/null <<EOL
-      name: k0s
-
-      services:
-
-        k0s-traefik-1:
-          image: docker.io/traefik:v3.3.5
-          container_name: k0s-traefik-1
-          hostname: k0s-traefik-1
-          network_mode: bridge
-          privileged: true
-          command:
-            - "--api.insecure=true"
-            - "--providers.docker=true"
-            - "--providers.docker.exposedbydefault=false"
-            - "--entryPoints.kube-api.address=:6443"
-            - "--entryPoints.controller-api.address=:9443"
-            - "--entryPoints.konnectivity.address=:8132"
-            - '--log.level=INFO'
-          ports:
-            - 6443:6443
-            - 9443:9443
-            - 8132:8132
-            - 8080:8080
-          volumes:
-            - /var/run/docker.sock:/var/run/docker.sock:ro
-
-        k0s-controller-1:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-controller-1
-          hostname: k0s-controller-1
-          network_mode: bridge
-          privileged: true
-          depends_on:
-            - k0s-traefik-1
-          command: k0s controller --enable-worker
-          post_start:
-            - command: ["/bin/sh", "-c", "sleep 15"]
-            - command: ["/bin/sh", "-c", "k0s token create --role=controller | tee /k0s-token-controller/token"]
-            - command: ["/bin/sh", "-c", "k0s token create --role=worker | tee /k0s-token-worker/token"]
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-controller:/k0s-token-controller
-            - k0s-token-worker:/k0s-token-worker
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-          labels:
-            - "traefik.enable=true"
-            - "traefik.tcp.routers.kube-api.service=kube-api"
-            - "traefik.tcp.routers.kube-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.kube-api.entrypoints=kube-api"
-            - "traefik.tcp.services.kube-api.loadbalancer.server.port=6443"
-            - "traefik.tcp.routers.controller-api.service=controller-api"
-            - "traefik.tcp.routers.controller-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.controller-api.entrypoints=controller-api"
-            - "traefik.tcp.services.controller-api.loadbalancer.server.port=9443"
-            - "traefik.tcp.routers.konnectivity.service=konnectivity"
-            - "traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.konnectivity.entrypoints=konnectivity"
-            - "traefik.tcp.services.konnectivity.loadbalancer.server.port=8132"
-
-        k0s-controller-2:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-controller-2
-          hostname: k0s-controller-2
-          network_mode: bridge
-          privileged: true
-          depends_on:
-            - k0s-controller-1
-          command: k0s controller --token-file /k0s-token-controller/token --enable-worker
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-controller:/k0s-token-controller:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-          labels:
-            - "traefik.enable=true"
-            - "traefik.tcp.routers.kube-api.service=kube-api"
-            - "traefik.tcp.routers.kube-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.kube-api.entrypoints=kube-api"
-            - "traefik.tcp.services.kube-api.loadbalancer.server.port=6443"
-            - "traefik.tcp.routers.controller-api.service=controller-api"
-            - "traefik.tcp.routers.controller-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.controller-api.entrypoints=controller-api"
-            - "traefik.tcp.services.controller-api.loadbalancer.server.port=9443"
-            - "traefik.tcp.routers.konnectivity.service=konnectivity"
-            - "traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.konnectivity.entrypoints=konnectivity"
-            - "traefik.tcp.services.konnectivity.loadbalancer.server.port=8132"
-
-        k0s-controller-3:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-controller-3
-          hostname: k0s-controller-3
-          network_mode: bridge
-          privileged: true
-          depends_on:
-            - k0s-controller-1
-          command: k0s controller --token-file /k0s-token-controller/token --enable-worker
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-controller:/k0s-token-controller:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-          labels:
-            - "traefik.enable=true"
-            - "traefik.tcp.routers.kube-api.service=kube-api"
-            - "traefik.tcp.routers.kube-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.kube-api.entrypoints=kube-api"
-            - "traefik.tcp.services.kube-api.loadbalancer.server.port=6443"
-            - "traefik.tcp.routers.controller-api.service=controller-api"
-            - "traefik.tcp.routers.controller-api.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.controller-api.entrypoints=controller-api"
-            - "traefik.tcp.services.controller-api.loadbalancer.server.port=9443"
-            - "traefik.tcp.routers.konnectivity.service=konnectivity"
-            - "traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)"
-            - "traefik.tcp.routers.konnectivity.entrypoints=konnectivity"
-            - "traefik.tcp.services.konnectivity.loadbalancer.server.port=8132"
-
-        k0s-worker-1:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-1
-          hostname: k0s-worker-1
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-
-        k0s-worker-2:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-2
-          hostname: k0s-worker-2
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-
-        k0s-worker-3:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-3
-          hostname: k0s-worker-3
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-        
-        k0s-worker-4:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-4
-          hostname: k0s-worker-4
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-
-        k0s-worker-5:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-5
-          hostname: k0s-worker-5
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-
-        k0s-worker-6:
-          image: docker.io/k0sproject/k0s:v1.32.3-k0s.0
-          container_name: k0s-worker-6
-          hostname: k0s-worker-6
-          network_mode: bridge
-          privileged: true
-          command: k0s worker --token-file /k0s-token-worker/token
-          depends_on:
-            - k0s-controller-1
-          volumes:
-            - /var/lib/k0s
-            - /var/log/pods
-            - k0s-token-worker:/k0s-token-worker:ro
-          tmpfs:
-            - /run
-            - /tmp
-          configs:
-            - source: k0s.yaml
-              target: /etc/k0s/k0s.yaml
-
-      configs:
-        k0s.yaml:
-          content: |
-            apiVersion: k0s.k0sproject.io/v1beta1
-            kind: ClusterConfig
-            metadata:
-              name: k0s
-            spec:
-              api:
-                externalAddress: 172.17.0.2
-                sans:
-                  - 172.17.0.2
-
-      volumes:
-        k0s-token-controller:
-          name: k0s-token-controller
-        k0s-token-worker:
-          name: k0s-token-worker
+      
       EOL

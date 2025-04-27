@@ -1,0 +1,68 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: python-ping-api-server
+  name: python-ping-api-server
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: python-ping-api-server
+  template:
+    metadata:
+      labels:
+        app: python-ping-api-server
+    spec:
+      containers:
+        - image: docker.io/tdesaules/python-ping-api-server:latest
+          imagePullPolicy: Always
+          name: python-ping-api-server
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: python-ping-api-service
+  name: python-ping-api-service
+  namespace: default
+spec:
+  ports:
+    - port: 8000
+      protocol: TCP
+      targetPort: 8000
+  selector:
+    app: python-ping-api-server
+  type: NodePort
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: python-ping-api-client
+  name: python-ping-api-client
+  namespace: default
+spec:
+  containers:
+    - command: ["sleep", "infinity"]
+      image: docker.io/library/alpine:latest
+      imagePullPolicy: Always
+      name: python-ping-api-client
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 250m
+          memory: 256Mi
