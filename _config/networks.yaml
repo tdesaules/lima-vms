@@ -1,5 +1,5 @@
 paths:
-  # socketVMNet: /opt/homebrew/Cellar/socket_vmnet/1.2.0/bin/socket_vmnet
+  socketVMNet: /opt/socket_vmnet/bin/socket_vmnet
   varRun: /private/var/run/lima
   sudoers: /private/etc/sudoers.d/lima
 

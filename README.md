@@ -1,5 +1,33 @@
 # LIMA VIRTUAL MACHINES
 
+## Basics Lima Commands
+
+### Sorim Audio
+
+```bash
+limactl create --tty=false sorim-audio.yaml
+limactl start sorim-audio
+limactl shell sorim-audio
+limactl stop sorim-audio
+limactl delete sorim-audio
+```
+
+### K0s
+
+```bash
+limactl create --tty=false k0s.yaml
+limactl start k0s
+limactl shell k0s
+limactl stop k0s
+limactl delete k0s
+```
+
+## Other
+
+limactl create --tty=false sorim-audio.yaml
+limactl list
+limactl shell sorim-audio
+
 docker compose up
 docker compose down --volumes
 docker compose ps

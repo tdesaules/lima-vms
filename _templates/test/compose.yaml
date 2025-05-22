@@ -1,0 +1,161 @@
+name: k0s
+
+x-k0s-service-traefik: &k0s-service-traefik
+  command:
+    - --api.insecure=true
+    - --providers.docker=true
+    - --providers.docker.exposedbydefault=false
+    - --ping
+    - --entryPoints.kube-api.address=:6443
+    - --entryPoints.k0s-api.address=:9443
+    - --entryPoints.konnectivity.address=:8132
+  healthcheck:
+    interval: 30s
+    retries: 3
+    start_interval: 5s
+    start_period: 10s
+    test:
+      - CMD
+      - /bin/sh
+      - -euc
+      - |
+        healthcheck() {
+          traefik healthcheck --ping | grep -q 'OK: http://:8080/ping'
+          return $?
+        }
+        healthcheck
+    timeout: 10s
+  image: docker.io/traefik:v3.3.5
+  ports:
+    - 8080:8080
+    - 6443:6443
+  privileged: true
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+
+x-k0s-service-controller: &k0s-service-controller
+  configs:
+    - source: k0s-config-1.yaml
+      target: /etc/k0s/k0s.yaml
+  healthcheck:
+    interval: 30s
+    retries: 3
+    start_interval: 5s
+    start_period: 30s
+    test:
+      - CMD
+      - /bin/sh
+      - -euc
+      - |
+        healthcheck() {
+          k0s kubectl get --raw='/livez' | grep -q 'ok'
+          return $?
+        }
+        healthcheck
+    timeout: 10s
+  image: docker.io/k0sproject/k0s:v1.32.4-k0s.0
+  labels:
+    - traefik.enable=true
+    - traefik.tcp.routers.kube-api.entrypoints=kube-api
+    - traefik.tcp.routers.kube-api.rule=HostSNI(`*`)
+    - traefik.tcp.routers.kube-api.service=kube-api
+    - traefik.tcp.services.kube-api.loadbalancer.server.port=6443
+    - traefik.tcp.routers.k0s-api.entrypoints=k0s-api
+    - traefik.tcp.routers.k0s-api.rule=HostSNI(`*`)
+    - traefik.tcp.routers.k0s-api.service=k0s-api
+    - traefik.tcp.services.k0s-api.loadbalancer.server.port=9443
+    - traefik.tcp.routers.konnectivity.entrypoints=konnectivity
+    - traefik.tcp.routers.konnectivity.rule=HostSNI(`*`)
+    - traefik.tcp.routers.konnectivity.service=konnectivity
+    - traefik.tcp.services.konnectivity.loadbalancer.server.port=8132
+  privileged: true
+  restart: on-failure
+  tmpfs:
+    - /run
+    - /tmp
+
+x-k0s-service-controller-primary: &k0s-service-controller-primary
+  command:
+    - k0s
+    - controller
+    - --enable-worker
+  depends_on:
+    k0s-service-traefik-1:
+      condition: service_healthy
+  post_start:
+    - command:
+        - /bin/sh
+        - -euc
+        - |
+          healthcheck() {
+            k0s kubectl get --raw='/livez' | grep -q 'ok'
+            return $?
+          }
+          bootstrap() {
+            find /run/secrets/k0s/controller ! -path /run/secrets/k0s/controller -prune -exec rm -rf {} +
+            k0s token create --role=controller | tee /run/secrets/k0s/controller/token
+            find /run/secrets/k0s/kubectl ! -path /run/secrets/k0s/kubectl -prune -exec rm -rf {} +
+            k0s kubeconfig admin | tee /run/secrets/k0s/kubectl/config
+          }
+          sleep 5
+          while [ ! healthcheck ] || [ ! bootstrap ]; do
+            sleep 1
+            echo "toto"
+          done
+  volumes:
+    - /var/lib/k0s
+    - k0s-volume-secrets-controller-1:/run/secrets/k0s/controller
+    - k0s-volume-secrets-kubectl-1:/run/secrets/k0s/kubectl
+
+networks:
+
+  k0s-net-1:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.1.0/24
+
+configs:
+
+  k0s-config-1.yaml:
+    content: |
+      apiVersion: k0s.k0s/v1beta1
+      kind: ClusterConfig
+      metadata:
+        name: k0s-cluster-1
+      spec:
+        api:
+          externalAddress: 172.18.1.254
+
+volumes:
+
+  k0s-volume-secrets-controller-1:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+
+  k0s-volume-secrets-kubectl-1:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+
+services:
+
+  k0s-service-traefik-1:
+    container_name: k0s-service-traefik-1
+    hostname: k0s-service-traefik-1
+    networks:
+      k0s-net-1:
+        ipv4_address: 172.18.1.254
+    <<: *k0s-service-traefik
+
+  k0s-service-controller-1:
+    container_name: k0s-service-controller-1
+    hostname: k0s-service-controller-1
+    networks:
+      k0s-net-1:
+        ipv4_address: 172.18.1.11
+    <<: [ *k0s-service-controller, *k0s-service-controller-primary ]
